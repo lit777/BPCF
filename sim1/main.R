@@ -5,16 +5,12 @@ rm(list=ls())
 sourceCpp("src/MCMC_main.cpp", rebuild = T)
 
 num_trial = 200
-n=300; P=7; m=150; n.iter=10000; n.iter_ps=5000
+n=300; P=7; m=150; n.iter=10000
 
-rcpp_sep = vector(mode = "numeric", length = num_trial)
-
-DE.final <- AE1.final <- AE2.final <- M1M0 <- NULL
-CI.DE <- CI.AE1 <- CI.AE2 <- CI.M1M0 <- NULL
+YE.final <- ME.final <- matrix(nrow=200, ncol=5)
 
 for(test_case in 1:200) {
   cat("Testing ", test_case, "of", num_trial, "at", format(Sys.time(), "%H:%M:%S"), "\n")
-  # sep --------------
 
   source("source/data.R")
   
@@ -30,28 +26,36 @@ for(test_case in 1:200) {
   f <- function(sd) qnorm(0.75, 0, sd) - sd(Y_out-mean(Y_out))             # second
   sigma_mu_y_tau_sigma <- uniroot.all(f, c(0.1^5, 100))
   
-  rcpp = MCMC(Xpred, Y_trt, M_out, Y_out, seq(0.05,0.95,by=0.05), p.grow, p.prune, p.change, m, m, 50, m, 50, nu, lambda, lambda_m, lambda_y, alpha, beta, n.iter_ps, n.iter, sigma_mu_m_tau_sigma, sigma_mu_m_mu_sigma, sigma_mu_y_tau_sigma, sigma_mu_y_mu_sigma)
+  PS.fit <- glm(Y_trt~Xpred, family=binomial())
+  PS <- predict(PS.fit, type="response")
   
-  DE <- AE1 <- AE2 <- NULL
+  rcpp = MCMC(Xpred, Y_trt, M_out, Y_out, as.numeric(PS), p.grow, p.prune, p.change, m, 50, m, 50, nu, lambda_m, lambda_y, alpha, beta, n.iter, sigma_mu_m_tau_sigma, sigma_mu_m_mu_sigma, sigma_mu_y_tau_sigma, sigma_mu_y_mu_sigma)
+  
+  
+  #------ Posterior Summary
+  YE <- matrix(nrow=5, ncol=500)
+  ME <- matrix(nrow=5, ncol=500)
+  m.interval <-  c(2.004158, 2.256113, 2.525802, 2.841687, 3.278662, 5.090102)
   for(i in 1:500){
-    DE[i] <- mean(rcpp$predicted_Y[abs(rcpp$predicted_S[,i])<0.5,i])
-    AE2[i] <- mean(rcpp$predicted_Y[(rcpp$predicted_S[,i])< -0.5,i])
-    AE1[i] <- mean(rcpp$predicted_Y[(rcpp$predicted_S[,i])> 0.5,i])
+    for(j in 1:5){
+      temp.u <-  m.interval[j+1]
+      temp.l <-  m.interval[j]
+      temp.ind <- which(rcpp$predicted_S[,i] >= temp.l & rcpp$predicted_S[,i] < temp.u)
+      ME[j,i] <- mean(rcpp$predicted_S[temp.ind,i])
+      YE[j,i] <- mean(rcpp$predicted_Y[temp.ind,i])
+    }
   }
-  
-  DE.final[test_case] <- mean(DE)
-  AE1.final[test_case] <- mean(AE1)
-  AE2.final[test_case] <- mean(AE2)
-  M1M0[test_case] <- mean(rowMeans(rcpp$predicted_S))
-  CI.de <- quantile(DE, c(0.025, 0.975))
-  CI.ae1 <- quantile(AE1, c(0.025, 0.975))
-  CI.ae2 <- quantile(AE2, c(0.025, 0.975))
-  CI.m1m0 <- quantile(colMeans(rcpp$predicted_S), c(0.025, 0.975))
-  if(CI.de[1] < -7.668984 & CI.de[2] > -7.668984){CI.DE[test_case] <- 1}
-  if(CI.ae1[1] < -12.77916 & CI.ae1[2] > -12.77916){CI.AE1[test_case] <- 1}
-  if(CI.ae2[1] < -3.727992 & CI.ae2[2] > -3.727992){CI.AE2[test_case] <- 1}
-  if(CI.m1m0[1] < 0.05 & CI.m1m0[2] > 0.05){CI.M1M0[test_case] <- 1}
+  YE.final[test_case, ] <- rowMeans(YE)
+  ME.final[test_case, ] <- rowMeans(ME)
 }
 
-#save.image("sim1.RData")
+
+Y.true <- c(-4.539873,  -5.711521,  -7.180378,  -9.278763, -14.108190)
+M.true <- c(2.129458, 2.388615, 2.678080, 3.043537, 3.736845)
+
+biasY <- colMeans(YE.final,na.rm=T) - Y.true
+mseY <- apply((YE.final - matrix(Y.true, nrow=200, ncol=5, byrow=T))^2, 2, mean,na.rm=T)
+
+biasM <- colMeans(ME.final,na.rm=T) - M.true
+mseM <- apply((ME.final - matrix(M.true, nrow=200, ncol=5, byrow=T))^2, 2, mean,na.rm=T)
 
